@@ -19,7 +19,7 @@ impl Broadcast
         info!("Starting");
         while let Ok(balance) = self.balance_rx.recv().await
         {
-            let json: String = serde_json::to_string(&balance).unwrap_or("{}".to_string());
+            let json = serde_json::to_string(&balance).unwrap_or("{}".to_string());
             let msg = Message::text(json);
             let _ = self.router_tx.unbounded_send(RouterCommand::Broadcast(msg));
         }

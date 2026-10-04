@@ -6,7 +6,12 @@ use futures::channel::mpsc::Sender;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::channel::mpsc::UnboundedSender;
 use futures::SinkExt;
+use log::debug;
+use log::error;
 use log::info;
+use serde::Deserialize;
+use serde::Serialize;
+use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use crate::calc::Cent;
@@ -18,7 +23,7 @@ pub enum LedgerCommand
     Delete(SocketAddr, Uuid),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
 pub struct LedgerEntry
 {
     pub value_date: NaiveDate,
@@ -48,7 +53,7 @@ impl Ledger
             match cmd
             {
                 LedgerCommand::Add(addr, entry) => self.handle_add(addr, entry).await,
-                LedgerCommand::Delete(addr, id) => self.handle_delete(addr, id),
+                LedgerCommand::Delete(addr, id) => self.handle_delete(addr, id).await,
             }
         }
     }
@@ -70,18 +75,34 @@ impl Ledger
         let id = Uuid::new_v4();
         self.entries.insert(id, entry);
         self.compute_balance();
-        self.forward_balance().await;
+        self.respond(addr, id.to_string());
+        self.publish_balance().await;
     }
 
-    fn handle_delete(&mut self, addr: SocketAddr, id: Uuid)
+    async fn handle_delete(&mut self, addr: SocketAddr, id: Uuid)
     {
+        info!("Deleting {}", id);
         self.entries.remove(&id);
         self.compute_balance();
-        self.forward_balance();
+        self.respond(addr, id.to_string());
+        self.publish_balance().await;
     }
 
-    async fn forward_balance(&mut self)
+    fn respond<T: Serialize>(&mut self, addr: SocketAddr, content: T)
     {
-        self.balance_tx.send(self.balances.clone()).await;
+        debug!("Responding");
+        let json = serde_json::to_string(&content).unwrap_or("{}".to_string());
+        let msg = Message::text(json.to_string());
+        let cmd = RouterCommand::Forward(addr, msg);
+        let _ = self.router_tx.unbounded_send(cmd);
+    }
+
+    async fn publish_balance(&mut self)
+    {
+        let _ = self
+            .balance_tx
+            .send(self.balances.clone())
+            .await
+            .inspect_err(|e| error!("Failed to write to Balance: {e}"));
     }
 }

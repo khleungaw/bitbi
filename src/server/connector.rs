@@ -1,8 +1,8 @@
+use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::UnboundedSender;
+use futures::future;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use futures::channel::mpsc::UnboundedSender;
-use futures::channel::mpsc::unbounded;
-use futures::future;
 use std::net::SocketAddr;
 use std::pin::pin;
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::server::LedgerCommand;
 use crate::server::message_parser::parse_message;
 use crate::server::router::RouterCommand;
+use crate::server::LedgerCommand;
 use crate::settings::Settings;
 
 pub struct Connector
@@ -71,7 +71,11 @@ impl Connector
         // Client -> Server: read -> ledger_tx
         let read_handler = read.try_for_each(|msg| {
             debug!("Client {}: {}", addr, msg);
-            let _ = ledger_tx.unbounded_send(parse_message(addr, msg));
+            if let Some(cmd) = parse_message(addr, msg)
+            {
+                let _ = ledger_tx.unbounded_send(cmd);
+            }
+
             future::ok(())
         });
 

@@ -1,20 +1,36 @@
 use std::net::SocketAddr;
 
 use chrono::NaiveDate;
+use log::{debug, info};
+use serde::Deserialize;
 use tokio_tungstenite::tungstenite::Message;
+use uuid::Uuid;
 
 use crate::server::ledger::LedgerEntry;
 use crate::server::LedgerCommand;
 
-pub fn parse_message(addr: SocketAddr, msg: Message) -> LedgerCommand
+#[derive(Deserialize)]
+pub enum ClientMessage
 {
-    LedgerCommand::Add(
-        addr,
-        LedgerEntry {
-            value_date: NaiveDate::from_ymd_opt(2026, 10, 3).unwrap(),
-            account: "daniel".to_string(),
-            amt: 1,
-            ccy: "HKD".to_string(),
-        },
-    )
+    Add(LedgerEntry),
+    Delete(Uuid),
+}
+
+pub fn parse_message(addr: SocketAddr, msg: Message) -> Option<LedgerCommand>
+{
+    let text = msg
+        .to_text()
+        .inspect_err(|e| debug!("Failed to read message from {addr} as text: {e}"))
+        .ok()?;
+
+    info!("Request from {}: {}", addr, text);
+    let parsed: ClientMessage = serde_json::from_str(text)
+        .inspect_err(|e| debug!("Failed to parse message from {addr}: {e}"))
+        .ok()?;
+
+    match parsed
+    {
+        ClientMessage::Add(entry) => Some(LedgerCommand::Add(addr, entry)),
+        ClientMessage::Delete(id) => Some(LedgerCommand::Delete(addr, id)),
+    }
 }
